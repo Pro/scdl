@@ -471,9 +471,11 @@ def download_track(track, playlist_name=None, playlist_file=None):
                 logger.debug(e)
         else:
             logger.error("This type of audio doesn't support tagging...")
-        history_list[track['permalink_url']]['id'] = track['id']
-        history_list[track['permalink_url']]['path'] = target_path
-        history_list[track['permalink_url']]['downloaded'] = datetime.datetime.now().isoformat()
+        history_list[track['permalink_url']] = {
+            'id': track['id'],
+            'path': target_path,
+            'downloaded': datetime.datetime.now().isoformat()
+        }
         with open(history_file, 'w') as outfile:
             json.dump(history_list, outfile)
     else:
