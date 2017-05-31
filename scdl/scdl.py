@@ -5,10 +5,10 @@
 
 Usage:
     scdl -l <track_url> [-a | -f | -t | -p][-c][-o <offset>]\
-[--hidewarnings][--debug | --error][--path <path>][--addtofile][--onlymp3]
+[--hidewarnings][--once][--debug | --error][--path <path>][--addtofile][--onlymp3]
 [--hide-progress][--min-size <size>][--max-size <size>]
     scdl me (-s | -a | -f | -t | -p | -m)[-c][-o <offset>]\
-[--hidewarnings][--debug | --error][--path <path>][--addtofile][--onlymp3]
+[--hidewarnings][--once][--debug | --error][--path <path>][--addtofile][--onlymp3]
 [--hide-progress][--min-size <size>][--max-size <size>]
     scdl -h | --help
     scdl --version
@@ -31,6 +31,7 @@ Options:
     --min-size [min-size] Skip tracks smaller than size (k/m/g)
     --max-size [max-size] Skip tracks larger than size (k/m/g)
     --hidewarnings        Hide Warnings. (use with precaution)
+    --once                Keep track of already downloaded files and do not download them again.
     --addtofile           Add the artist name to the filename if it isn't in the filename already
     --onlymp3             Download only the mp3 file even if the track is Downloadable
     --error               Only print debug information (Error/Warning)
@@ -50,6 +51,8 @@ import requests
 import re
 import tempfile
 import codecs
+import json
+import datetime
 
 import configparser
 import mutagen
@@ -70,6 +73,10 @@ arguments = None
 token = ''
 path = ''
 offset = 0
+only_once = False
+
+history_file = os.path.join(os.path.expanduser('~'), '.config/scdl/history.json')
+history_list = dict()
 
 url = {
     'playlists-liked': ('https://api-v2.soundcloud.com/users/{0}/playlists'
@@ -97,6 +104,7 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
     global offset
     global arguments
+    global only_once
 
     # Parse argument
     arguments = docopt(__doc__, version=__version__)
@@ -147,6 +155,9 @@ def main():
     if arguments['--hidewarnings']:
         warnings.filterwarnings('ignore')
 
+    if arguments['--once']:
+        only_once = True
+
     if arguments['--path'] is not None:
         if os.path.exists(arguments['--path']):
             os.chdir(arguments['--path'])
@@ -188,6 +199,10 @@ def get_config():
     else:
         logger.error('Invalid path in scdl.cfg...')
         sys.exit()
+    global history_list
+    if os.path.exists(history_file):
+        with open(history_file) as data_file:
+            history_list = json.load(data_file)
 
 
 def get_item(track_url, client_id=CLIENT_ID):
@@ -406,6 +421,12 @@ def download_track(track, playlist_name=None, playlist_file=None):
             )
         )
 
+    if only_once:
+        if track['permalink_url'] in history_list:
+            logger.info('{0} already listed in history'.format(title))
+            return
+
+
     # Download
     if not os.path.isfile(filename):
         if r is None or r.status_code == 401:
@@ -440,7 +461,8 @@ def download_track(track, playlist_name=None, playlist_file=None):
                     f.write(chunk)
                     f.flush()
 
-        shutil.move(temp.name, os.path.join(os.getcwd(), filename))
+        target_path = os.path.join(os.getcwd(), filename)
+        shutil.move(temp.name, target_path)
         if filename.endswith('.mp3') or filename.endswith('.m4a'):
             try:
                 setMetadata(track, filename, playlist_name)
@@ -449,6 +471,11 @@ def download_track(track, playlist_name=None, playlist_file=None):
                 logger.debug(e)
         else:
             logger.error("This type of audio doesn't support tagging...")
+        history_list[track['permalink_url']]['id'] = track['id']
+        history_list[track['permalink_url']]['path'] = target_path
+        history_list[track['permalink_url']]['downloaded'] = datetime.datetime.now().isoformat()
+        with open(history_file, 'w') as outfile:
+            json.dump(history_list, outfile)
     else:
         if arguments['-c']:
             logger.info('{0} already Downloaded'.format(title))
